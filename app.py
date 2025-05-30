@@ -13,15 +13,27 @@ app = Flask(__name__)
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-secret-key")
 app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024
 
-# OpenAI integration - with fallback
+# OpenAI integration - REQUIRED (no fallback)
 try:
-    import openai
-    openai.api_key = os.environ.get("OPENAI_API_KEY")
+    from openai import OpenAI
+    
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        raise ValueError("OPENAI_API_KEY environment variable is required")
+    
+    openai_client = OpenAI(api_key=api_key)
     OPENAI_AVAILABLE = True
-    print("✅ OpenAI integration enabled")
+    print("✅ OpenAI integration enabled - REAL AI MODE ONLY")
 except ImportError as e:
-    print(f"⚠️  OpenAI not available (using simulated AI): {e}")
+    print(f"❌ CRITICAL ERROR: OpenAI package not available: {e}")
+    print("Install with: pip install openai")
     OPENAI_AVAILABLE = False
+    openai_client = None
+except ValueError as e:
+    print(f"❌ CRITICAL ERROR: {e}")
+    print("Set your OpenAI API key in the .env file")
+    OPENAI_AVAILABLE = False
+    openai_client = None
 
 ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg"}
 
@@ -34,14 +46,15 @@ def encode_image(image_path):
         return base64.b64encode(image_file.read()).decode('utf-8')
 
 def analyze_image_with_openai(image_path, user_prompt):
-    """Analyze image using OpenAI Vision API and generate LUT instructions"""
-    if not OPENAI_AVAILABLE:
-        return simulate_ai_analysis(user_prompt)
+    """Analyze image using OpenAI Vision API and generate LUT instructions - REAL AI ONLY"""
+    if not OPENAI_AVAILABLE or not openai_client:
+        raise Exception("OpenAI integration is not available. Real AI analysis cannot be performed. Please check your API key and installation.")
     
     try:
         base64_image = encode_image(image_path)
         
-        response = openai.chat.completions.create(
+        print(f"🧠 Sending image to OpenAI GPT-4o Vision for analysis...")
+        response = openai_client.chat.completions.create(
             model="gpt-4o",
             messages=[
                 {
@@ -88,108 +101,24 @@ Analyze the image's current color temperature, contrast, and lighting conditions
             max_tokens=1500
         )
         
+        print(f"✅ OpenAI response received successfully")
+        
         # Parse the JSON response
         content = response.choices[0].message.content
         try:
             json_start = content.find('{')
             json_end = content.rfind('}') + 1
             json_content = content[json_start:json_end]
-            return json.loads(json_content)
-        except:
-            return simulate_ai_analysis(user_prompt)
+            result = json.loads(json_content)
+            print(f"🎨 Generated color grading: {result.get('base_style', 'Custom Look')}")
+            return result
+        except json.JSONDecodeError as e:
+            raise Exception(f"OpenAI returned invalid JSON response: {e}")
             
     except Exception as e:
-        print(f"OpenAI API Error: {str(e)}")
-        return simulate_ai_analysis(user_prompt)
-
-def simulate_ai_analysis(user_prompt):
-    """Simulate AI analysis with intelligent responses based on common color grading requests"""
-    prompt_lower = user_prompt.lower()
-    
-    # Analyze prompt for key terms and generate appropriate adjustments
-    base_adjustments = {
-        "temperature": 0,
-        "tint": 0,
-        "exposure": 0,
-        "contrast": 0,
-        "highlights": 0,
-        "shadows": 0,
-        "whites": 0,
-        "blacks": 0,
-        "saturation": 0,
-        "vibrance": 0
-    }
-    
-    style_name = "Adaptive AI Look"
-    description = "AI-generated color grading based on your description"
-    
-    # Warm/Cool temperature adjustments
-    if any(word in prompt_lower for word in ["warm", "golden", "sunset", "orange", "amber"]):
-        base_adjustments["temperature"] = 25
-        base_adjustments["tint"] = -5
-        style_name = "Warm Cinematic Look"
-        description = "Warm, golden color grading with enhanced orange tones"
-    elif any(word in prompt_lower for word in ["cool", "blue", "teal", "cyan", "winter", "cold"]):
-        base_adjustments["temperature"] = -20
-        base_adjustments["tint"] = 10
-        style_name = "Cool Modern Look"
-        description = "Cool, modern color grading with blue-teal tones"
-    
-    # Cinematic styles
-    if any(word in prompt_lower for word in ["cinematic", "film", "movie", "dramatic"]):
-        base_adjustments["contrast"] = 20
-        base_adjustments["shadows"] = -15
-        base_adjustments["highlights"] = -10
-        base_adjustments["saturation"] = 10
-        style_name = "Cinematic Film Look"
-        description = "Dramatic cinematic color grading with enhanced contrast"
-    
-    # Vintage/Film styles
-    if any(word in prompt_lower for word in ["vintage", "retro", "film", "analog", "kodak", "fuji"]):
-        base_adjustments["temperature"] = 15
-        base_adjustments["contrast"] = -10
-        base_adjustments["saturation"] = -5
-        base_adjustments["vibrance"] = 15
-        style_name = "Vintage Film Look"
-        description = "Classic film emulation with vintage color characteristics"
-    
-    # High contrast/moody
-    if any(word in prompt_lower for word in ["moody", "dark", "dramatic", "high contrast"]):
-        base_adjustments["contrast"] = 30
-        base_adjustments["shadows"] = -25
-        base_adjustments["blacks"] = 15
-        base_adjustments["saturation"] = 15
-        style_name = "Moody Dramatic Look"
-        description = "High contrast, moody color grading with deep shadows"
-    
-    # Bright/airy
-    if any(word in prompt_lower for word in ["bright", "airy", "light", "clean", "fresh"]):
-        base_adjustments["exposure"] = 0.3
-        base_adjustments["highlights"] = -20
-        base_adjustments["shadows"] = 20
-        base_adjustments["whites"] = 10
-        style_name = "Bright & Airy Look"
-        description = "Light, airy color grading with lifted shadows"
-    
-    # Teal and Orange
-    if any(word in prompt_lower for word in ["teal", "orange", "blockbuster", "hollywood"]):
-        base_adjustments["temperature"] = 10
-        base_adjustments["tint"] = 15
-        base_adjustments["contrast"] = 25
-        base_adjustments["saturation"] = 20
-        style_name = "Teal & Orange Blockbuster"
-        description = "Hollywood blockbuster style with teal highlights and orange skin tones"
-    
-    return {
-        "base_style": style_name,
-        "adjustments": base_adjustments,
-        "color_wheels": {
-            "shadows": {"red": 0.0, "green": 0.0, "blue": 0.0},
-            "midtones": {"red": 0.0, "green": 0.0, "blue": 0.0},
-            "highlights": {"red": 0.0, "green": 0.0, "blue": 0.0}
-        },
-        "description": description
-    }
+        error_msg = f"OpenAI API Error: {str(e)}"
+        print(f"❌ {error_msg}")
+        raise Exception(error_msg)
 
 def create_test_image(original_image_path, lut_instructions, output_path):
     """Create a test image showing the LUT effect"""
@@ -247,16 +176,25 @@ def frontend():
 
 @app.route("/api/health")
 def health_check():
-    openai_status = "enabled" if OPENAI_AVAILABLE else "simulated"
+    openai_status = "enabled" if OPENAI_AVAILABLE else "disabled"
     return jsonify({
-        "status": "healthy", 
+        "status": "healthy" if OPENAI_AVAILABLE else "openai_required", 
         "service": "adaptive-lut-app",
-        "openai_integration": openai_status
+        "openai_integration": openai_status,
+        "mode": "real_ai_only" if OPENAI_AVAILABLE else "openai_required"
     })
 
 @app.route("/api/process-lut", methods=["POST"])
 def process_lut():
     try:
+        # Check OpenAI availability first
+        if not OPENAI_AVAILABLE:
+            return jsonify({
+                "error": "OpenAI integration is required for real AI analysis",
+                "message": "This app is configured for OpenAI-only mode. Please check your API key configuration.",
+                "required_action": "Set OPENAI_API_KEY environment variable"
+            }), 503
+        
         if "image" not in request.files:
             return jsonify({"error": "No image file provided"}), 400
         
@@ -274,11 +212,13 @@ def process_lut():
             upload_path = f"static/temp/upload_{timestamp}_{filename}"
             file.save(upload_path)
             
-            # Analyze image (with OpenAI or simulation)
-            lut_instructions = analyze_image_with_openai(upload_path, prompt)
-            
-            # Generate LUT file
             try:
+                # Analyze image with OpenAI (REAL AI ONLY)
+                print(f"🚀 Starting OpenAI analysis for: '{prompt}'")
+                lut_instructions = analyze_image_with_openai(upload_path, prompt)
+                print(f"✅ OpenAI analysis completed successfully")
+                
+                # Generate LUT file
                 from lut_generator import create_lut_from_json
                 lut_filename = f"adaptive_lut_{timestamp}.cube"
                 lut_path = f"static/luts/{lut_filename}"
@@ -290,12 +230,13 @@ def process_lut():
                 test_image_created = create_test_image(upload_path, lut_instructions, test_image_path)
                 
                 response_data = {
-                    "message": "LUT generated successfully!",
+                    "message": "LUT generated successfully with OpenAI analysis!",
                     "lut_instructions": lut_instructions,
                     "download_url": f"/download/lut/{lut_filename}",
                     "lut_file": lut_filename,
                     "status": "success",
-                    "ai_mode": "openai" if OPENAI_AVAILABLE else "simulated"
+                    "ai_mode": "openai_gpt4o_vision",
+                    "analysis_type": "real_ai"
                 }
                 
                 if test_image_created:
@@ -304,7 +245,21 @@ def process_lut():
                 return jsonify(response_data)
                 
             except Exception as e:
-                return jsonify({"error": f"LUT generation error: {str(e)}"}), 500
+                error_message = str(e)
+                print(f"❌ OpenAI Analysis Error: {error_message}")
+                
+                # Clean up uploaded file
+                try:
+                    os.remove(upload_path)
+                except:
+                    pass
+                
+                return jsonify({
+                    "error": "OpenAI analysis failed",
+                    "message": error_message,
+                    "ai_mode": "openai_required",
+                    "suggestion": "Check your OpenAI API key and internet connection"
+                }), 500
         else:
             return jsonify({"error": "Invalid file type. Please upload JPEG or PNG images."}), 400
             
@@ -334,5 +289,10 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     print(f"🎨 Adaptive LUT Server starting on port {port}")
     print(f"📁 Static files directory: {os.path.abspath('static')}")
-    print(f"🤖 AI Mode: {'OpenAI GPT-4o Vision' if OPENAI_AVAILABLE else 'Simulated Intelligence'}")
+    if OPENAI_AVAILABLE:
+        print(f"🤖 AI Mode: OpenAI GPT-4o Vision (REAL AI ONLY)")
+        print(f"🧠 Ready to analyze images with real artificial intelligence!")
+    else:
+        print(f"❌ AI Mode: OpenAI Required - App will not process images without API key")
+        print(f"🔧 Please set OPENAI_API_KEY in your .env file")
     app.run(host="0.0.0.0", port=port, debug=True)
